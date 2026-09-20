@@ -35,6 +35,6 @@
 
 ### Fork-owned commands
 
-- `howcode` (wrapper in `~/.local/bin`): launches the last build output without watchers — the "editable install". Ignores source changes until the next `bun run build`; uses the default profile (`~/.config/howcode`).
+- `howcode` (symlink in `~/.local/bin` → `scripts/howcode-launcher.sh`): launches the last build output without watchers — the "editable install". Ignores source changes until the next `bun run build`; uses the default profile (`~/.config/howcode`).
 - `bun run build`: machine-adapted full build (vite → node/esbuild runtime → electron-builder with `npm_config_ignore_scripts=false` and the Node 25/26 path env vars baked in). Run this for a new version.
 - `bun run dev`: live hacking loop (vite HMR + artifact watch + auto-relaunch), separate `dev` user profile. Runs entirely under Node via `scripts/dev-runner.mjs`; the canary Bun on k10 must not run long-lived processes.
