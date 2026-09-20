@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 const sourceRoots = [
@@ -51,11 +51,19 @@ function toRepoPath(filePath: string) {
   return path.relative(process.cwd(), filePath).replaceAll(path.sep, '/')
 }
 
-async function collectSourceFiles() {
+function collectSourceFiles() {
   const files: string[] = []
-  const glob = new Bun.Glob('**/*.{ts,tsx,js,cjs,mjs}')
+  // Node port of the former Bun.Glob scan; ext/test/ignore filters preserved.
   for (const root of sourceRoots) {
-    for await (const relativePath of glob.scan({ cwd: root, onlyFiles: true })) {
+    for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const relativePath = path
+        .relative(root, path.join(entry.parentPath, entry.name))
+        .replaceAll(path.sep, '/')
+      if (
+        !sourceExtensions.includes(path.extname(relativePath) as (typeof sourceExtensions)[number])
+      )
+        continue
       if (testFilePattern.test(relativePath) || ignoredDirectoryPattern.test(relativePath)) continue
       files.push(path.resolve(root, relativePath))
     }
@@ -302,7 +310,7 @@ function reportFailures(boundaryViolations: string[], cycles: string[][]) {
 
 async function main() {
   if (!existsSync('tsconfig.json')) throw new Error('Run architecture checks from the repo root.')
-  const files = await collectSourceFiles()
+  const files = collectSourceFiles()
   const { boundaryViolations, graph } = buildArchitectureGraph(files, readAliases())
   const cycles = findCycles(graph)
   if (boundaryViolations.length > 0 || cycles.length > 0) {

@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createServer } from 'vite'
@@ -7,11 +8,14 @@ const sourceRoots = ['src/app', 'src/test', 'src/electron', 'desktop']
 const howcodeImportPattern =
   /(?:import\s*\(\s*|(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)?)['"](@howcode\/[^'"]+)['"]/g
 
-async function collectSourceFiles(root: string): Promise<string[]> {
-  const glob = new Bun.Glob('**/*.{ts,tsx,js,jsx,mts,mjs}')
+// Node port of the former Bun.Glob scan: recursive walk filtered by extension.
+function collectSourceFiles(root: string): string[] {
   const files: string[] = []
-  for await (const file of glob.scan({ cwd: root, onlyFiles: true })) {
-    if (sourceFileExtensions.has(path.extname(file))) files.push(path.join(root, file))
+  for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    const relativePath = path.relative(root, path.join(entry.parentPath, entry.name))
+    if (sourceFileExtensions.has(path.extname(relativePath)))
+      files.push(path.join(root, relativePath))
   }
   return files
 }
@@ -27,7 +31,7 @@ async function main() {
   const failures: string[] = []
 
   try {
-    const files = (await Promise.all(sourceRoots.map(collectSourceFiles))).flat()
+    const files = sourceRoots.flatMap((root) => collectSourceFiles(root))
     for (const file of files) {
       const source = await readFile(file, 'utf8')
       for (const match of source.matchAll(howcodeImportPattern)) {
