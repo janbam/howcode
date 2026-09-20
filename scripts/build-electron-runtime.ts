@@ -1,9 +1,12 @@
 import { cp, mkdir, rm, watch } from 'node:fs/promises'
 import path from 'node:path'
+import { type BuildOptions, build, context } from 'esbuild'
 
 const isWatchMode = process.argv.includes('--watch')
 const projectRoot = process.cwd()
 const buildRoot = path.join(projectRoot, 'build')
+// Strips the extension token from Bun-era naming entries ("[dir]/[name].cjs").
+const namingExtensionPattern = /\.[cm]?js$/
 
 const buildTargets = [
   {
@@ -65,27 +68,38 @@ async function copyDesktopResources() {
 async function runBuild() {
   await prepareBuildDirectories()
 
-  const builds = await Promise.all(
-    buildTargets.map((target) =>
-      Bun.build({
-        entrypoints: [...target.entrypoints],
-        outdir: target.outdir,
-        root: target.root,
-        naming: target.naming,
-        target: 'node',
-        format: target.format,
-        packages: 'external',
-        sourcemap: 'linked',
-        watch: isWatchMode,
-        throw: true,
-      } as Bun.BuildConfig & { watch?: boolean }),
-    ),
+  // Node-run port of the former Bun.build loop: esbuild backend, same targets.
+  // entryNames keeps the original Bun naming tokens minus the extension; esbuild
+  // would append ".js" to a template without [ext], so exact names (.cjs/.mjs)
+  // come from outExtension keyed by the target format.
+  const options = buildTargets.map(
+    (target): BuildOptions => ({
+      entryPoints: [...target.entrypoints],
+      outdir: target.outdir,
+      outbase: target.root,
+      entryNames: target.naming.entry.replace(namingExtensionPattern, ''),
+      outExtension: { '.js': target.format === 'cjs' ? '.cjs' : '.mjs' },
+      target: `node${process.versions.node.split('.')[0]}`,
+      format: target.format,
+      packages: 'external',
+      sourcemap: true,
+      bundle: true,
+      platform: 'node',
+      logLevel: 'warning',
+    }),
   )
 
-  for (const [index, build] of builds.entries()) {
-    console.log(
-      `Built ${buildTargets[index]?.label ?? `target-${index}`} (${build.outputs.length} output(s)).`,
-    )
+  if (isWatchMode) {
+    await Promise.all(options.map((opts) => context(opts).then((ctx) => ctx.watch())))
+  } else {
+    for (const [index, opts] of options.entries()) {
+      const result = await build(opts)
+      // esbuild reports failures in result.errors instead of throwing;
+      // fail here so the error stays next to its cause (Bun's old throw:true).
+      if (result.errors.length > 0)
+        throw new Error(`esbuild failed for ${buildTargets[index]?.label}`)
+      console.log(`Built ${buildTargets[index]?.label ?? `target-${index}`}.`)
+    }
   }
 
   await copyDesktopResources()

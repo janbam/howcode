@@ -6,6 +6,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { build } from 'esbuild'
 import { createServer, type ViteDevServer } from 'vite'
 
 import {
@@ -49,18 +50,23 @@ let isShuttingDown = false
 
 async function buildDevWebBridge() {
   await mkdir(path.dirname(bridgeBuildPath), { recursive: true })
-  const result = await Bun.build({
-    entrypoints: [path.join(projectRoot, 'scripts', 'dev-web-bridge-node.ts')],
-    outdir: path.dirname(bridgeBuildPath),
-    naming: path.basename(bridgeBuildPath),
-    target: 'node',
+  // Node-run port of the former Bun.build call: same bundle shape, esbuild backend.
+  const result = await build({
+    entryPoints: [path.join(projectRoot, 'scripts', 'dev-web-bridge-node.ts')],
+    outfile: bridgeBuildPath,
+    bundle: true,
+    platform: 'node',
     format: 'esm',
     packages: 'external',
-    sourcemap: 'linked',
-    throw: true,
+    sourcemap: true,
+    logLevel: 'warning',
   })
 
-  console.log(`Built dev:web bridge (${result.outputs.length} output(s)).`)
+  // esbuild reports failures in result.errors instead of throwing; fail loudly
+  // so a broken bridge build never masquerades as a stale-bundle startup error.
+  if (result.errors.length > 0) throw new Error('esbuild failed for the dev:web bridge')
+
+  console.log('Built dev:web bridge.')
 }
 
 async function shutdown(exitCode = 0) {
